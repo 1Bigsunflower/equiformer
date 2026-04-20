@@ -665,8 +665,77 @@ class TransBlock(torch.nn.Module):
         node_output = node_output + node_features
         
         return node_output
-    
-        
+
+
+import json
+class NodeEmbeddingNetwork_new(torch.nn.Module):
+
+    def __init__(
+            self,
+            irreps_node_embedding,
+            max_atom_type=_MAX_ATOM_TYPE,
+            bias=True,
+            h=1.0,
+            l=1.0
+    ):
+        super().__init__()
+
+        self.max_atom_type = max_atom_type
+        self.irreps_node_embedding = o3.Irreps(irreps_node_embedding)
+        self.atom_type_lin = LinearRS(
+            o3.Irreps(f'{self.max_atom_type}x0e'),
+            self.irreps_node_embedding,
+            bias=bias
+        )
+        self.atom_type_lin.tp.weight.data.mul_(self.max_atom_type ** 0.5)
+
+        # L_embedding 分支
+        emb_dim = self.irreps_node_embedding.dim
+        self.atom_embedding = torch.nn.Embedding(
+            num_embeddings=self.max_atom_type,
+            embedding_dim=emb_dim
+        )
+
+        # H_embedding 分支
+        with open("atom_init.json", "r") as f:
+            json_data = json.load(f)
+        # 构建 embedding 表
+        json_dim = len(next(iter(json_data.values())))
+        embedding_table = torch.zeros(self.max_atom_type, json_dim)
+
+        for k, v in json_data.items():
+            embedding_table[int(k)] = torch.tensor(v)
+
+        self.register_buffer("json_embedding_table", embedding_table)
+
+        self.json_linear = LinearRS(
+            o3.Irreps(f'{json_dim}x0e'),
+            self.irreps_node_embedding,
+            bias=bias
+        )
+
+        self.h = h
+        self.l = l
+
+    def forward(self, node_atom):
+        """
+        node_atom: LongTensor
+        """
+
+        node_atom_onehot = torch.nn.functional.one_hot(
+            node_atom, self.max_atom_type
+        ).float()
+        node_attr = node_atom_onehot
+
+        L_embedding = self.atom_embedding(node_atom)
+
+        json_feat = self.json_embedding_table[node_atom]  # [N, json_dim]
+        H_embedding = self.json_linear(json_feat)
+
+        node_embedding = self.h * H_embedding + self.l * L_embedding
+
+        return node_embedding, node_attr, node_atom_onehot
+
 class NodeEmbeddingNetwork(torch.nn.Module):
     
     def __init__(self, irreps_node_embedding, max_atom_type=_MAX_ATOM_TYPE, bias=True):
