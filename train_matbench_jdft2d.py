@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 from dataclasses import dataclass
 from typing import List
@@ -7,7 +8,7 @@ import numpy as np
 import torch
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-
+from random import seed
 import nets
 from nets import model_entrypoint
 
@@ -220,6 +221,16 @@ def parse_args():
 
 
 def main():
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    init_seed = 42
+    torch.manual_seed(init_seed)
+    torch.cuda.manual_seed(init_seed)
+    torch.cuda.manual_seed_all(init_seed)
+    np.random.seed(init_seed)  # 用于numpy的随机数
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    seed(init_seed)
+
     args = parse_args()
     set_seed(args.seed)
 
