@@ -145,6 +145,8 @@ def run_fold(args, task, fold: int, device: torch.device) -> float:
         task_std=fold_data.std,
         atomref=None,
         drop_path=args.drop_path,
+        h=args.h,
+        l=args.l
     ).to(device)
 
     optimizer = torch.optim.AdamW(
@@ -206,6 +208,8 @@ def parse_args():
     parser.add_argument("--radius", type=float, default=5.0)
     parser.add_argument("--num-basis", type=int, default=128)
     parser.add_argument("--drop-path", type=float, default=0.0)
+    parser.add_argument("--h", type=float, default=1.0)
+    parser.add_argument("--l", type=float, default=1.0)
 
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=5e-3)

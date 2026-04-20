@@ -697,7 +697,11 @@ class NodeEmbeddingNetwork_new(torch.nn.Module):
         )
 
         # H_embedding 分支
-        with open("atom_init.json", "r") as f:
+        import os
+        current_dir = os.path.dirname(__file__)
+        json_file = os.path.join(current_dir, "atom_init.json")
+
+        with open(json_file, "r") as f:
             json_data = json.load(f)
         # 构建 embedding 表
         json_dim = len(next(iter(json_data.values())))
@@ -816,7 +820,10 @@ class GraphAttentionTransformer(torch.nn.Module):
         norm_layer='layer',
         alpha_drop=0.2, proj_drop=0.0, out_drop=0.0,
         drop_path_rate=0.0,
-        mean=None, std=None, scale=None, atomref=None):
+        mean=None, std=None, scale=None, atomref=None,
+        h=1.0,
+        l=1.0
+        ):
         super().__init__()
 
         self.max_radius = max_radius
@@ -846,8 +853,11 @@ class GraphAttentionTransformer(torch.nn.Module):
         self.rescale_degree = rescale_degree
         self.nonlinear_message = nonlinear_message
         self.irreps_mlp_mid = o3.Irreps(irreps_mlp_mid)
+        self.h=h
+        self.l=l
         
-        self.atom_embed = NodeEmbeddingNetwork(self.irreps_node_embedding, _MAX_ATOM_TYPE)
+        self.atom_embed = NodeEmbeddingNetwork_new(self.irreps_node_embedding, _MAX_ATOM_TYPE,h=self.h,l=self.l)
+        # self.atom_embed = NodeEmbeddingNetwork(self.irreps_node_embedding, _MAX_ATOM_TYPE)
         self.basis_type = basis_type
         if self.basis_type == 'gaussian':
             self.rbf = GaussianRadialBasisLayer(self.number_of_basis, cutoff=self.max_radius)
@@ -983,7 +993,8 @@ def graph_attention_transformer_l2(irreps_in, radius, num_basis=128,
         irreps_mlp_mid='384x0e+192x1e+96x2e',
         norm_layer='layer',
         alpha_drop=0.2, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+)
     return model
 
 
@@ -1002,7 +1013,9 @@ def graph_attention_transformer_nonlinear_l2(irreps_in, radius, num_basis=128,
         irreps_mlp_mid='384x0e+192x1e+96x2e',
         norm_layer='layer',
         alpha_drop=0.2, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+
+    )
     return model
 
 
@@ -1021,7 +1034,9 @@ def graph_attention_transformer_nonlinear_l2_e3(irreps_in, radius, num_basis=128
         irreps_mlp_mid='384x0e+96x0o+96x1e+96x1o+48x2e+48x2o',
         norm_layer='layer',
         alpha_drop=0.2, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+
+    )
     return model
 
 
@@ -1041,7 +1056,9 @@ def graph_attention_transformer_nonlinear_bessel_l2(irreps_in, radius, num_basis
         irreps_mlp_mid='384x0e+192x1e+96x2e',
         norm_layer='layer',
         alpha_drop=0.2, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+
+    )
     return model
 
 
@@ -1061,7 +1078,9 @@ def graph_attention_transformer_nonlinear_bessel_l2_drop01(irreps_in, radius, nu
         irreps_mlp_mid='384x0e+192x1e+96x2e',
         norm_layer='layer',
         alpha_drop=0.1, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+
+    )
     return model
 
 
@@ -1081,5 +1100,7 @@ def graph_attention_transformer_nonlinear_bessel_l2_drop00(irreps_in, radius, nu
         irreps_mlp_mid='384x0e+192x1e+96x2e',
         norm_layer='layer',
         alpha_drop=0.0, proj_drop=0.0, out_drop=0.0, drop_path_rate=0.0,
-        mean=task_mean, std=task_std, scale=None, atomref=atomref)
+        mean=task_mean, std=task_std, scale=None, atomref=atomref,
+
+    )
     return model
