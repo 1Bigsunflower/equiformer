@@ -44,7 +44,7 @@ from .graph_attention_transformer_md17 import (
 _RESCALE = True
 _USE_BIAS = True
 
-_MAX_ATOM_TYPE = 64 # Set to some large value
+_MAX_ATOM_TYPE = 103 # Set to some large value
 
 # Statistics of QM9 with cutoff radius = 5
 # For simplicity, use the same statistics for MD17

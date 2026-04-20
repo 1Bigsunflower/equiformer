@@ -1,7 +1,7 @@
 import argparse
 import random
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 import torch
@@ -16,6 +16,7 @@ from nets import model_entrypoint
 class FoldData:
     train: List[Data]
     val: List[Data]
+    test: List[Data]
     mean: float
     std: float
 
@@ -34,26 +35,37 @@ def structure_to_data(structure, target: float) -> Data:
     return Data(z=z, pos=pos, y=y)
 
 
-def build_fold_data(task, fold: int) -> FoldData:
+def build_fold_data(task, fold: int, val_ratio: float, seed: int) -> FoldData:
     train_inputs, train_outputs = task.get_train_and_val_data(fold)
-    val_inputs, val_outputs = task.get_test_data(fold, include_target=True)
+    test_inputs, test_outputs = task.get_test_data(fold, include_target=True)
 
-    train_targets = np.asarray(train_outputs, dtype=np.float32)
-    mean = float(train_targets.mean())
-    std = float(train_targets.std())
+    train_val_targets = np.asarray(train_outputs, dtype=np.float32)
+    mean = float(train_val_targets.mean())
+    std = float(train_val_targets.std())
     if std < 1e-12:
         std = 1.0
 
-    train_graphs = [
+    train_val_graphs = [
         structure_to_data(structure, target)
-        for structure, target in zip(train_inputs, train_targets)
-    ]
-    val_graphs = [
-        structure_to_data(structure, target)
-        for structure, target in zip(val_inputs, np.asarray(val_outputs, dtype=np.float32))
+        for structure, target in zip(train_inputs, train_val_targets)
     ]
 
-    return FoldData(train=train_graphs, val=val_graphs, mean=mean, std=std)
+    num_train_val = len(train_val_graphs)
+    val_size = max(1, int(num_train_val * val_ratio))
+    val_size = min(val_size, num_train_val - 1)
+    generator = torch.Generator().manual_seed(seed + int(fold))
+    permutation = torch.randperm(num_train_val, generator=generator).tolist()
+    val_indices = set(permutation[:val_size])
+
+    train_graphs = [g for i, g in enumerate(train_val_graphs) if i not in val_indices]
+    val_graphs = [g for i, g in enumerate(train_val_graphs) if i in val_indices]
+
+    test_graphs = [
+        structure_to_data(structure, target)
+        for structure, target in zip(test_inputs, np.asarray(test_outputs, dtype=np.float32))
+    ]
+
+    return FoldData(train=train_graphs, val=val_graphs, test=test_graphs, mean=mean, std=std)
 
 
 def train_epoch(model, loader, optimizer, device, mean: float, std: float) -> float:
@@ -99,8 +111,8 @@ def evaluate_mae(model, loader, device, mean: float, std: float) -> float:
     return total_mae / max(total_size, 1)
 
 
-def run_fold(args, task, fold: int, device: torch.device) -> Tuple[float, float]:
-    fold_data = build_fold_data(task, fold)
+def run_fold(args, task, fold: int, device: torch.device) -> float:
+    fold_data = build_fold_data(task, fold, val_ratio=args.val_ratio, seed=args.seed)
 
     train_loader = DataLoader(
         fold_data.train,
@@ -111,6 +123,13 @@ def run_fold(args, task, fold: int, device: torch.device) -> Tuple[float, float]
     )
     val_loader = DataLoader(
         fold_data.val,
+        batch_size=args.eval_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=args.pin_memory,
+    )
+    test_loader = DataLoader(
+        fold_data.test,
         batch_size=args.eval_batch_size,
         shuffle=False,
         num_workers=args.num_workers,
@@ -135,6 +154,7 @@ def run_fold(args, task, fold: int, device: torch.device) -> Tuple[float, float]
     )
 
     best_val = float("inf")
+    best_test = float("inf")
     for epoch in range(1, args.epochs + 1):
         train_loss = train_epoch(
             model,
@@ -151,24 +171,34 @@ def run_fold(args, task, fold: int, device: torch.device) -> Tuple[float, float]
             fold_data.mean,
             fold_data.std,
         )
-        best_val = min(best_val, val_mae)
+        test_mae = evaluate_mae(
+            model,
+            test_loader,
+            device,
+            fold_data.mean,
+            fold_data.std,
+        )
+        if val_mae <= best_val:
+            best_val = val_mae
+            best_test = test_mae
 
         print(
             f"[fold {fold:02d}] epoch {epoch:03d}/{args.epochs} "
-            f"train_l1={train_loss:.6f} val_mae={val_mae:.6f} best_val={best_val:.6f}"
+            f"train_l1={train_loss:.6f} val_mae={val_mae:.6f} test_mae={test_mae:.6f} "
+            f"best_val={best_val:.6f} best_test={best_test:.6f}"
         )
 
-    return val_mae, best_val
+    return best_test
 
 
 def parse_args():
     parser = argparse.ArgumentParser("Train Equiformer on Matbench JDFT2D")
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--eval-batch-size", type=int, default=16)
-    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--pin-memory", action="store_true")
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=42)
 
     # Keep model defaults aligned with repository defaults.
     parser.add_argument("--model-name", type=str, default="graph_attention_transformer_nonlinear_l2_md17")
@@ -179,6 +209,7 @@ def parse_args():
 
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=5e-3)
+    parser.add_argument("--val-ratio", type=float, default=0.2)
 
     parser.add_argument("--max-folds", type=int, default=None, help="Only run first N folds for quick debug")
     return parser.parse_args()
@@ -206,13 +237,14 @@ def main():
         if args.max_folds is not None:
             folds = folds[: args.max_folds]
 
-        fold_best_scores = []
+        fold_test_scores = []
         for fold in folds:
-            _, best_val = run_fold(args, task, fold, device)
-            fold_best_scores.append(best_val)
+            best_test = run_fold(args, task, fold, device)
+            fold_test_scores.append(best_test)
 
-        mean_best = float(np.mean(fold_best_scores)) if fold_best_scores else float("nan")
-        print(f"Task {task.dataset_name}: mean best val MAE over {len(fold_best_scores)} folds = {mean_best:.6f}")
+
+        mean_best = float(np.mean(fold_test_scores)) if fold_test_scores else float("nan")
+        print(f"Task {task.dataset_name}: mean test MAE over {len(fold_test_scores)} folds = {mean_best:.6f}")
 
 
 if __name__ == "__main__":
